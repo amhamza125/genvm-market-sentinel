@@ -60,6 +60,7 @@ export default function MarketSentinelV4() {
     setExpectedHash('');
 
     try {
+      // 1. Fetch live market data (Vercel routes safely to Binance)
       const res = await fetch(`/api/snapshot?pair=${encodeURIComponent(selectedPair)}&timeframe=4h`, { redirect: 'follow' });
       if (!res.ok) throw new Error(`[HTTP ${res.status}] API failed to fetch market data.`);
       const data = await res.json();
@@ -69,6 +70,7 @@ export default function MarketSentinelV4() {
          throw new Error("Backend did not return valid OHLCV market fields.");
       }
 
+      // 2. Extract ONLY the 9 strict contract fields
       const cleanData = {
         candle_timestamp: String(source.candle_timestamp),
         close: String(source.close),
@@ -82,6 +84,7 @@ export default function MarketSentinelV4() {
       };
       setSnapshotData(cleanData);
 
+      // 3. Hash locally to guarantee 100% parity
       const sortedKeys = Object.keys(cleanData).sort() as (keyof typeof cleanData)[];
       const sortedStr = "{" + sortedKeys.map(k => `"${k}":"${cleanData[k]}"`).join(",") + "}";
       const msgBuffer = new TextEncoder().encode(sortedStr);
@@ -89,20 +92,35 @@ export default function MarketSentinelV4() {
       const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
       setExpectedHash(hashHex);
 
-      const hostRes = await fetch('/api/host', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cleanData)
-      });
+      // 4. Host directly from the Browser (Bypasses Vercel datacenter blocklists)
+      let finalUrl = '';
       
-      const hostData = await hostRes.json();
-      
-      // Extract the REAL error from the proxy so it's not hidden
-      if (!hostRes.ok) {
-         throw new Error(`Proxy Error: ${hostData.error || 'Unknown Hosting Failure'}`);
+      try {
+        const npointRes = await fetch('https://api.npoint.io', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cleanData)
+        });
+        if (npointRes.ok) {
+          const ndata = await npointRes.json();
+          if (ndata.id) finalUrl = `https://api.npoint.io/${ndata.id}`;
+        }
+      } catch (e) {
+        console.log("Npoint client-side fetch failed, falling back to JsonBlob.");
       }
-      
-      setWebhookUrl(hostData.hostedUrl);
+
+      if (!finalUrl) {
+        const blobRes = await fetch('https://jsonblob.com/api/jsonBlob', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(cleanData)
+        });
+        if (!blobRes.ok) throw new Error(`Browser IP upload rejected by JsonBlob (Status: ${blobRes.status})`);
+        finalUrl = blobRes.headers.get('Location') || blobRes.headers.get('location') || '';
+      }
+
+      if (!finalUrl) throw new Error("Could not extract URL from external host.");
+      setWebhookUrl(finalUrl);
       
     } catch (err: any) {
       setErrorMsg(`Webhook Pipeline Error: ${err.message}`);
