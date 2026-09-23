@@ -5,10 +5,10 @@ import { createClient } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
 import { custom } from 'viem';
 
-const CONTRACT_ADDRESS = "0x0245bDFBf619c5817d5a892c2a6aF11b460DcBF5";
+const CONTRACT_ADDRESS = "0x142B0CCC368f54eb6870f9eA98365fa9571F6DD6";
 const SUPPORTED_PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "NEAR/USDT", "VIRTUAL/USDT"];
 
-export default function MarketSentinelV6() {
+export default function MarketSentinelV6_1() {
   const [userAddress, setUserAddress] = useState('');
   const [selectedPair, setSelectedPair] = useState("BTC/USDT");
   
@@ -134,7 +134,7 @@ export default function MarketSentinelV6() {
       <div className="max-w-3xl mx-auto space-y-6">
         <header className="border-b border-neutral-800 pb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-emerald-400">Market Sentinel V6</h1>
+            <h1 className="text-2xl font-bold text-emerald-400">Market Sentinel V6.1</h1>
             <p className="text-[10px] text-neutral-500 mt-1">Contract: {CONTRACT_ADDRESS}</p>
           </div>
           <div>
