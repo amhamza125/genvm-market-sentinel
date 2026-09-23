@@ -68,19 +68,26 @@ export default function MarketSentinelV4() {
     setExpectedHash('');
 
     try {
-      // Dynamically construct the absolute webhook URL for GenLayer validators to call
       const absoluteWebhookUrl = `${window.location.origin}/api/snapshot?pair=${encodeURIComponent(selectedPair)}&timeframe=4h`;
       
       const res = await fetch(absoluteWebhookUrl);
-      if (!res.ok) throw new Error(`Webhook fetch failed: ${res.statusText}`);
+      
+      // FIX: Extract the actual text/json body if the backend throws an error
+      if (!res.ok) {
+        let errorDetails = '';
+        try {
+            const errData = await res.json();
+            errorDetails = JSON.stringify(errData);
+        } catch {
+            errorDetails = await res.text();
+        }
+        throw new Error(`[HTTP ${res.status}] ${errorDetails || 'Silent backend failure'}`);
+      }
       
       const data = await res.json();
       setSnapshotData(data);
       
-      // The frontend uses the absolute API route URL as the webhook parameter for the smart contract
       setWebhookUrl(absoluteWebhookUrl);
-      
-      // Handle the hash dynamically depending on how your API route named the variable
       setExpectedHash(data.hash || data.expected_sha256 || '');
       
     } catch (err: any) {
@@ -157,7 +164,7 @@ export default function MarketSentinelV4() {
         </header>
 
         {errorMsg && (
-          <div className="bg-red-950/60 border border-red-800 text-red-300 p-3 rounded-lg text-xs font-mono">
+          <div className="bg-red-950/60 border border-red-800 text-red-300 p-3 rounded-lg text-xs font-mono break-all">
             <strong>Error:</strong> {errorMsg}
           </div>
         )}
@@ -191,7 +198,7 @@ export default function MarketSentinelV4() {
           <section className="bg-neutral-900 border border-neutral-800 p-5 rounded-xl space-y-3">
             <h2 className="text-sm font-bold text-blue-400">2. Webhook Payload Info</h2>
             <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800 text-xs font-mono space-y-1 overflow-x-auto text-neutral-300">
-              <p><span className="text-neutral-500">Target Webhook:</span> <a href={webhookUrl} target="_blank" rel="noreferrer" className="text-blue-400 underline">{webhookUrl}</a></p>
+              <p><span className="text-neutral-500">Target Webhook:</span> <a href={webhookUrl} target="_blank" rel="noreferrer" className="text-blue-400 underline break-all">{webhookUrl}</a></p>
               <p><span className="text-neutral-500">SHA-256 Hash:</span> <span className="text-emerald-400">{expectedHash}</span></p>
             </div>
 
