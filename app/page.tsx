@@ -69,6 +69,7 @@ export default function MarketSentinelV4() {
          throw new Error("Backend did not return valid OHLCV market fields.");
       }
 
+      // Extract exactly the 9 fields the smart contract demands
       const cleanData = {
         candle_timestamp: String(source.candle_timestamp),
         close: String(source.close),
@@ -82,6 +83,7 @@ export default function MarketSentinelV4() {
       };
       setSnapshotData(cleanData);
 
+      // Sort alphabetically to guarantee identical hashing with Python's json.dumps(sort_keys=True)
       const sortedKeys = Object.keys(cleanData).sort() as (keyof typeof cleanData)[];
       const sortedStr = "{" + sortedKeys.map(k => `"${k}":"${cleanData[k]}"`).join(",") + "}";
       
@@ -90,11 +92,13 @@ export default function MarketSentinelV4() {
       const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
       setExpectedHash(hashHex);
 
-      // 4. ZERO DEPENDENCY ECHO URL (Bypasses external hosts completely)
+      // 4. ZERO WAF HTTPBIN ECHO (Bypasses Vercel firewalls entirely)
       const base64Data = btoa(sortedStr);
-      const echoUrl = `${window.location.origin}/api/echo?d=${encodeURIComponent(base64Data)}`;
+      const urlEncodedBase64 = encodeURIComponent(base64Data);
       
-      // The contract strictly enforces a 512 character limit. Our payload sits comfortably around 320 chars.
+      // HttpBin instantly decodes the Base64 in the URL and returns it as a pure string.
+      const echoUrl = `https://httpbin.org/base64/${urlEncodedBase64}`;
+      
       if (echoUrl.length > 512) {
           throw new Error(`Generated URL exceeds GenLayer's 512 max limit (${echoUrl.length} chars).`);
       }
