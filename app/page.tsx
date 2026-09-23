@@ -6,7 +6,6 @@ import { studionet } from 'genlayer-js/chains';
 import { custom } from 'viem';
 
 const CONTRACT_ADDRESS = "0xC5fE6209fe3e9F5a757cE9939A2Ae79648D2FDE9";
-
 const SUPPORTED_PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "NEAR/USDT", "VIRTUAL/USDT"];
 
 export default function MarketSentinelV4() {
@@ -61,7 +60,6 @@ export default function MarketSentinelV4() {
     setExpectedHash('');
 
     try {
-      // 1. Fetch live market data from your existing backend
       const res = await fetch(`/api/snapshot?pair=${encodeURIComponent(selectedPair)}&timeframe=4h`, { redirect: 'follow' });
       if (!res.ok) throw new Error(`[HTTP ${res.status}] API failed to fetch market data.`);
       const data = await res.json();
@@ -71,7 +69,6 @@ export default function MarketSentinelV4() {
          throw new Error("Backend did not return valid OHLCV market fields.");
       }
 
-      // 2. Extract ONLY the 9 strict contract fields
       const cleanData = {
         candle_timestamp: String(source.candle_timestamp),
         close: String(source.close),
@@ -85,7 +82,6 @@ export default function MarketSentinelV4() {
       };
       setSnapshotData(cleanData);
 
-      // 3. Hash locally to guarantee 100% parity with V5 python contract
       const sortedKeys = Object.keys(cleanData).sort() as (keyof typeof cleanData)[];
       const sortedStr = "{" + sortedKeys.map(k => `"${k}":"${cleanData[k]}"`).join(",") + "}";
       const msgBuffer = new TextEncoder().encode(sortedStr);
@@ -93,15 +89,18 @@ export default function MarketSentinelV4() {
       const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
       setExpectedHash(hashHex);
 
-      // 4. Proxy upload the clean data to JsonBlob via Server (Bypasses Vercel WAF & CORS)
       const hostRes = await fetch('/api/host', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(cleanData)
       });
       
-      if (!hostRes.ok) throw new Error("Failed to proxy host the JSON payload.");
       const hostData = await hostRes.json();
+      
+      // Extract the REAL error from the proxy so it's not hidden
+      if (!hostRes.ok) {
+         throw new Error(`Proxy Error: ${hostData.error || 'Unknown Hosting Failure'}`);
+      }
       
       setWebhookUrl(hostData.hostedUrl);
       
