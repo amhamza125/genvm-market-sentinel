@@ -90,15 +90,41 @@ export default function MarketSentinelV4() {
       const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
       setExpectedHash(hashHex);
 
-      // 4. ZERO DEPENDENCY ECHO URL (Native Vercel, bypassing HttpBin)
-      const base64Data = btoa(sortedStr);
-      const echoUrl = `${window.location.origin}/api/echo?d=${encodeURIComponent(base64Data)}`;
-      
-      if (echoUrl.length > 512) {
-          throw new Error(`Generated URL exceeds GenLayer's 512 max limit (${echoUrl.length} chars).`);
+      let finalUrl = '';
+
+      // Primary: ByteBin (Zero WAF, pure JSON delivery)
+      try {
+        const byteRes = await fetch('https://bytebin.lucko.me/post', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: sortedStr
+        });
+        if (byteRes.ok) {
+          const byteData = await byteRes.json();
+          if (byteData.key) finalUrl = `https://bytebin.lucko.me/${byteData.key}`;
+        }
+      } catch (e) {
+        console.log("ByteBin client fallback triggered.");
       }
 
-      setWebhookUrl(echoUrl);
+      // Fallback: Automated Mocky API
+      if (!finalUrl) {
+        const mockyRes = await fetch('https://run.mocky.io/api/mock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: 200,
+            content: sortedStr,
+            content_type: "application/json",
+            charset: "UTF-8"
+          })
+        });
+        if (!mockyRes.ok) throw new Error("Failed to auto-host payload. Check adblocker or CORS.");
+        const mockyData = await mockyRes.json();
+        finalUrl = mockyData.link;
+      }
+
+      setWebhookUrl(finalUrl);
       
     } catch (err: any) {
       setErrorMsg(`Webhook Pipeline Error: ${err.message}`);
@@ -207,7 +233,7 @@ export default function MarketSentinelV4() {
           <section className="bg-neutral-900 border border-neutral-800 p-5 rounded-xl space-y-3">
             <h2 className="text-sm font-bold text-blue-400">2. Validator Payload Ready</h2>
             <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800 text-xs font-mono space-y-1 overflow-x-auto text-neutral-300">
-              <p><span className="text-neutral-500">Stateless Host:</span> <a href={webhookUrl} target="_blank" rel="noreferrer" className="text-blue-400 underline break-all">{webhookUrl}</a></p>
+              <p><span className="text-neutral-500">Decentralized Host:</span> <a href={webhookUrl} target="_blank" rel="noreferrer" className="text-blue-400 underline break-all">{webhookUrl}</a></p>
               <p><span className="text-neutral-500">SHA-256 Lock:</span> <span className="text-emerald-400">{expectedHash}</span></p>
             </div>
 
