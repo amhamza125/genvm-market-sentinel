@@ -68,11 +68,12 @@ export default function MarketSentinelV4() {
     setExpectedHash('');
 
     try {
+      // Create the URL explicitly to avoid trailing slash 308 redirects
       const absoluteWebhookUrl = `${window.location.origin}/api/snapshot?pair=${encodeURIComponent(selectedPair)}&timeframe=4h`;
       
-      const res = await fetch(absoluteWebhookUrl);
+      // Force the fetch to follow redirects
+      const res = await fetch(absoluteWebhookUrl, { redirect: 'follow' });
       
-      // FIX: Extract the actual text/json body if the backend throws an error
       if (!res.ok) {
         let errorDetails = '';
         try {
@@ -85,10 +86,18 @@ export default function MarketSentinelV4() {
       }
       
       const data = await res.json();
+      console.log("Raw API Response:", data); // This logs it to your browser console
       setSnapshotData(data);
       
-      setWebhookUrl(absoluteWebhookUrl);
-      setExpectedHash(data.hash || data.expected_sha256 || '');
+      // Some Vercel setups require the explicit final URL that handled the redirect
+      setWebhookUrl(res.url);
+      
+      // Check every common hash naming convention your API might be using
+      const hashValue = data.hash || data.expected_sha256 || data.sha256 || data.hashLock || '';
+      if (!hashValue) {
+         setErrorMsg(`Warning: Webhook succeeded but could not find hash in response: ${JSON.stringify(data).substring(0, 100)}...`);
+      }
+      setExpectedHash(hashValue);
       
     } catch (err: any) {
       setErrorMsg(`Webhook API Error: ${err.message}`);
@@ -204,7 +213,7 @@ export default function MarketSentinelV4() {
 
             <button
               onClick={evaluateMarket}
-              disabled={isEvaluating || !userAddress}
+              disabled={isEvaluating || !userAddress || !expectedHash}
               className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-lg text-sm font-bold transition disabled:opacity-50"
             >
               {isEvaluating ? 'Evaluating via GenLayer Validators...' : 'Evaluate Market On-Chain'}
