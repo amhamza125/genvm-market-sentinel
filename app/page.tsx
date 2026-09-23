@@ -60,7 +60,6 @@ export default function MarketSentinelV4() {
     setExpectedHash('');
 
     try {
-      // 1. Fetch live market data (Vercel routes safely to Binance)
       const res = await fetch(`/api/snapshot?pair=${encodeURIComponent(selectedPair)}&timeframe=4h`, { redirect: 'follow' });
       if (!res.ok) throw new Error(`[HTTP ${res.status}] API failed to fetch market data.`);
       const data = await res.json();
@@ -70,7 +69,6 @@ export default function MarketSentinelV4() {
          throw new Error("Backend did not return valid OHLCV market fields.");
       }
 
-      // 2. Extract ONLY the 9 strict contract fields
       const cleanData = {
         candle_timestamp: String(source.candle_timestamp),
         close: String(source.close),
@@ -84,43 +82,24 @@ export default function MarketSentinelV4() {
       };
       setSnapshotData(cleanData);
 
-      // 3. Hash locally to guarantee 100% parity
       const sortedKeys = Object.keys(cleanData).sort() as (keyof typeof cleanData)[];
       const sortedStr = "{" + sortedKeys.map(k => `"${k}":"${cleanData[k]}"`).join(",") + "}";
+      
       const msgBuffer = new TextEncoder().encode(sortedStr);
       const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
       const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
       setExpectedHash(hashHex);
 
-      // 4. Host directly from the Browser (Bypasses Vercel datacenter blocklists)
-      let finalUrl = '';
+      // 4. ZERO DEPENDENCY ECHO URL (Bypasses external hosts completely)
+      const base64Data = btoa(sortedStr);
+      const echoUrl = `${window.location.origin}/api/echo?d=${encodeURIComponent(base64Data)}`;
       
-      try {
-        const npointRes = await fetch('https://api.npoint.io', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(cleanData)
-        });
-        if (npointRes.ok) {
-          const ndata = await npointRes.json();
-          if (ndata.id) finalUrl = `https://api.npoint.io/${ndata.id}`;
-        }
-      } catch (e) {
-        console.log("Npoint client-side fetch failed, falling back to JsonBlob.");
+      // The contract strictly enforces a 512 character limit. Our payload sits comfortably around 320 chars.
+      if (echoUrl.length > 512) {
+          throw new Error(`Generated URL exceeds GenLayer's 512 max limit (${echoUrl.length} chars).`);
       }
 
-      if (!finalUrl) {
-        const blobRes = await fetch('https://jsonblob.com/api/jsonBlob', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify(cleanData)
-        });
-        if (!blobRes.ok) throw new Error(`Browser IP upload rejected by JsonBlob (Status: ${blobRes.status})`);
-        finalUrl = blobRes.headers.get('Location') || blobRes.headers.get('location') || '';
-      }
-
-      if (!finalUrl) throw new Error("Could not extract URL from external host.");
-      setWebhookUrl(finalUrl);
+      setWebhookUrl(echoUrl);
       
     } catch (err: any) {
       setErrorMsg(`Webhook Pipeline Error: ${err.message}`);
@@ -229,7 +208,7 @@ export default function MarketSentinelV4() {
           <section className="bg-neutral-900 border border-neutral-800 p-5 rounded-xl space-y-3">
             <h2 className="text-sm font-bold text-blue-400">2. Validator Payload Ready</h2>
             <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800 text-xs font-mono space-y-1 overflow-x-auto text-neutral-300">
-              <p><span className="text-neutral-500">Decentralized Host:</span> <a href={webhookUrl} target="_blank" rel="noreferrer" className="text-blue-400 underline break-all">{webhookUrl}</a></p>
+              <p><span className="text-neutral-500">Stateless Host:</span> <a href={webhookUrl} target="_blank" rel="noreferrer" className="text-blue-400 underline break-all">{webhookUrl}</a></p>
               <p><span className="text-neutral-500">SHA-256 Lock:</span> <span className="text-emerald-400">{expectedHash}</span></p>
             </div>
 
