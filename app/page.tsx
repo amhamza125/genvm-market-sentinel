@@ -7,13 +7,7 @@ import { custom } from 'viem';
 
 const CONTRACT_ADDRESS = "0xC5fE6209fe3e9F5a757cE9939A2Ae79648D2FDE9";
 
-const SUPPORTED_PAIRS = [
-  "BTC/USDT",
-  "ETH/USDT",
-  "SOL/USDT",
-  "NEAR/USDT",
-  "VIRTUAL/USDT"
-];
+const SUPPORTED_PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "NEAR/USDT", "VIRTUAL/USDT"];
 
 export default function MarketSentinelV4() {
   const [userAddress, setUserAddress] = useState('');
@@ -47,7 +41,6 @@ export default function MarketSentinelV4() {
 
   const getClient = async () => {
     if (!userAddress) throw new Error("Wallet not connected.");
-    
     const client = createClient({
       chain: studionet,
       account: userAddress as `0x${string}`,
@@ -68,39 +61,52 @@ export default function MarketSentinelV4() {
     setExpectedHash('');
 
     try {
-      // Create the URL explicitly to avoid trailing slash 308 redirects
-      const absoluteWebhookUrl = `${window.location.origin}/api/snapshot?pair=${encodeURIComponent(selectedPair)}&timeframe=4h`;
-      
-      // Force the fetch to follow redirects
-      const res = await fetch(absoluteWebhookUrl, { redirect: 'follow' });
-      
-      if (!res.ok) {
-        let errorDetails = '';
-        try {
-            const errData = await res.json();
-            errorDetails = JSON.stringify(errData);
-        } catch {
-            errorDetails = await res.text();
-        }
-        throw new Error(`[HTTP ${res.status}] ${errorDetails || 'Silent backend failure'}`);
-      }
-      
+      // 1. Fetch live market data from your existing backend
+      const res = await fetch(`/api/snapshot?pair=${encodeURIComponent(selectedPair)}&timeframe=4h`, { redirect: 'follow' });
+      if (!res.ok) throw new Error(`[HTTP ${res.status}] API failed to fetch market data.`);
       const data = await res.json();
-      console.log("Raw API Response:", data); // This logs it to your browser console
-      setSnapshotData(data);
       
-      // Some Vercel setups require the explicit final URL that handled the redirect
-      setWebhookUrl(res.url);
-      
-      // Check every common hash naming convention your API might be using
-      const hashValue = data.hash || data.expected_sha256 || data.sha256 || data.hashLock || '';
-      if (!hashValue) {
-         setErrorMsg(`Warning: Webhook succeeded but could not find hash in response: ${JSON.stringify(data).substring(0, 100)}...`);
+      const source = data.marketData || data.payload || data;
+      if (!source.close || !source.candle_timestamp) {
+         throw new Error("Backend did not return valid OHLCV market fields.");
       }
-      setExpectedHash(hashValue);
+
+      // 2. Extract ONLY the 9 strict contract fields
+      const cleanData = {
+        candle_timestamp: String(source.candle_timestamp),
+        close: String(source.close),
+        high: String(source.high),
+        low: String(source.low),
+        open: String(source.open),
+        pair: String(source.pair),
+        previous_close: String(source.previous_close),
+        timeframe: String(source.timeframe),
+        volume: String(source.volume)
+      };
+      setSnapshotData(cleanData);
+
+      // 3. Hash locally to guarantee 100% parity with V5 python contract
+      const sortedKeys = Object.keys(cleanData).sort() as (keyof typeof cleanData)[];
+      const sortedStr = "{" + sortedKeys.map(k => `"${k}":"${cleanData[k]}"`).join(",") + "}";
+      const msgBuffer = new TextEncoder().encode(sortedStr);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+      const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+      setExpectedHash(hashHex);
+
+      // 4. Proxy upload the clean data to JsonBlob via Server (Bypasses Vercel WAF & CORS)
+      const hostRes = await fetch('/api/host', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cleanData)
+      });
+      
+      if (!hostRes.ok) throw new Error("Failed to proxy host the JSON payload.");
+      const hostData = await hostRes.json();
+      
+      setWebhookUrl(hostData.hostedUrl);
       
     } catch (err: any) {
-      setErrorMsg(`Webhook API Error: ${err.message}`);
+      setErrorMsg(`Webhook Pipeline Error: ${err.message}`);
     } finally {
       setIsLoadingSnapshot(false);
     }
@@ -141,7 +147,6 @@ export default function MarketSentinelV4() {
         await new Promise(r => setTimeout(r, 6000));
         setTxStatus('Transaction broadcasted.');
       }
-
     } catch (err: any) {
       setErrorMsg(`Execution Error: ${err.message || err}`);
       setTxStatus('Failed');
@@ -156,8 +161,8 @@ export default function MarketSentinelV4() {
         
         <header className="border-b border-neutral-800 pb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-emerald-400">Market Sentinel V4</h1>
-            <p className="text-xs text-neutral-400 mt-1">Contract: {CONTRACT_ADDRESS}</p>
+            <h1 className="text-2xl font-bold text-emerald-400">Market Sentinel V5</h1>
+            <p className="text-[10px] text-neutral-500 mt-1">Contract: {CONTRACT_ADDRESS}</p>
           </div>
           <div>
             {!userAddress ? (
@@ -199,16 +204,16 @@ export default function MarketSentinelV4() {
             disabled={isLoadingSnapshot}
             className="w-full bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 py-2.5 rounded-lg text-xs font-bold transition disabled:opacity-50"
           >
-            {isLoadingSnapshot ? 'Calling Snapshot Webhook...' : `Fetch Webhook Data for ${selectedPair}`}
+            {isLoadingSnapshot ? 'Generating Consensus Payload...' : `Fetch Webhook Data for ${selectedPair}`}
           </button>
         </section>
 
         {snapshotData && (
           <section className="bg-neutral-900 border border-neutral-800 p-5 rounded-xl space-y-3">
-            <h2 className="text-sm font-bold text-blue-400">2. Webhook Payload Info</h2>
+            <h2 className="text-sm font-bold text-blue-400">2. Validator Payload Ready</h2>
             <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800 text-xs font-mono space-y-1 overflow-x-auto text-neutral-300">
-              <p><span className="text-neutral-500">Target Webhook:</span> <a href={webhookUrl} target="_blank" rel="noreferrer" className="text-blue-400 underline break-all">{webhookUrl}</a></p>
-              <p><span className="text-neutral-500">SHA-256 Hash:</span> <span className="text-emerald-400">{expectedHash}</span></p>
+              <p><span className="text-neutral-500">Decentralized Host:</span> <a href={webhookUrl} target="_blank" rel="noreferrer" className="text-blue-400 underline break-all">{webhookUrl}</a></p>
+              <p><span className="text-neutral-500">SHA-256 Lock:</span> <span className="text-emerald-400">{expectedHash}</span></p>
             </div>
 
             <button
@@ -216,7 +221,7 @@ export default function MarketSentinelV4() {
               disabled={isEvaluating || !userAddress || !expectedHash}
               className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-lg text-sm font-bold transition disabled:opacity-50"
             >
-              {isEvaluating ? 'Evaluating via GenLayer Validators...' : 'Evaluate Market On-Chain'}
+              {isEvaluating ? 'Executing AI Consensus...' : 'Evaluate Market On-Chain'}
             </button>
           </section>
         )}
