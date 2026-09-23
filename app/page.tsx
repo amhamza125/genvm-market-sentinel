@@ -5,7 +5,7 @@ import { createClient } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
 import { custom } from 'viem';
 
-const CONTRACT_ADDRESS = "0xBDbA84E5FA6c60C9Ac048eB6aab1739bc63c1d57";
+const CONTRACT_ADDRESS = "0xC5fE6209fe3e9F5a757cE9939A2Ae79648D2FDE9";
 
 const SUPPORTED_PAIRS = [
   "BTC/USDT",
