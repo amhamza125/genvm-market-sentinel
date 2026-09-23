@@ -51,6 +51,13 @@ export default function MarketSentinelV6_1() {
     return client;
   };
 
+  // Helper to force exactly 6 decimal places for contract compatibility
+  const formatDecimal = (val: string | number) => {
+    const num = Number(val);
+    if (isNaN(num)) return "0.000000";
+    return num.toFixed(6);
+  };
+
   const fetchSnapshotData = async () => {
     setErrorMsg('');
     setIsLoadingSnapshot(true);
@@ -63,16 +70,18 @@ export default function MarketSentinelV6_1() {
       const data = await res.json();
       
       const source = data.marketData || data.payload || data;
+      
+      // Clean and strictly format decimals to max 6 places
       const cleanData = {
         candle_timestamp: String(source.candle_timestamp),
-        close: String(source.close),
-        high: String(source.high),
-        low: String(source.low),
-        open: String(source.open),
+        close: formatDecimal(source.close),
+        high: formatDecimal(source.high),
+        low: formatDecimal(source.low),
+        open: formatDecimal(source.open),
         pair: String(source.pair),
-        previous_close: String(source.previous_close),
+        previous_close: formatDecimal(source.previous_close),
         timeframe: String(source.timeframe),
-        volume: String(source.volume)
+        volume: formatDecimal(source.volume)
       };
 
       const sortedKeys = Object.keys(cleanData).sort() as (keyof typeof cleanData)[];
