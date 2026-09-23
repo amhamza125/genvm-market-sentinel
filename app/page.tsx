@@ -5,14 +5,15 @@ import { createClient } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
 import { custom } from 'viem';
 
-const CONTRACT_ADDRESS = "0xBC0EA242b572fee26c6D3EE36D38016FC307a00E";
+// Ensure this matches your GenLayer Studio deployment
+const CONTRACT_ADDRESS = "0x142B0CCC368f54eb6870f9eA98365fa9571F6DD6"; 
 const SUPPORTED_PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "NEAR/USDT", "VIRTUAL/USDT"];
 
-export default function MarketSentinelV7() {
+export default function MarketSentinelV6_2() {
   const [userAddress, setUserAddress] = useState('');
   const [selectedPair, setSelectedPair] = useState("BTC/USDT");
   
-  const [webhookUrl, setWebhookUrl] = useState('');
+  const [snapshotJson, setSnapshotJson] = useState('');
   const [expectedHash, setExpectedHash] = useState('');
   
   const [isLoadingSnapshot, setIsLoadingSnapshot] = useState(false);
@@ -27,18 +28,23 @@ export default function MarketSentinelV7() {
     setErrorMsg('');
     if (typeof window !== 'undefined' && typeof (window as any).ethereum !== 'undefined') {
       try {
-        const accounts = await (window as any).ethereum.request({ method: 'eth_requestAccounts' });
+        const accounts = await (window as any).ethereum.request({ 
+          method: 'eth_requestAccounts' 
+        });
         setUserAddress(accounts[0]);
       } catch (err: any) {
         setErrorMsg(`Wallet connection failed: ${err.message}`);
       }
     } else {
-      setErrorMsg("No Web3 wallet found. Please open this page inside MetaMask browser.");
+      setErrorMsg("No Web3 wallet found. Please open this page inside a Web3 browser like MetaMask.");
     }
   };
 
   const getClient = async () => {
-    if (!userAddress) throw new Error("Wallet not connected.");
+    if (!userAddress) {
+      throw new Error("Wallet not connected.");
+    }
+    
     const client = createClient({
       chain: studionet,
       account: userAddress as `0x${string}`,
@@ -48,26 +54,32 @@ export default function MarketSentinelV7() {
     if (typeof client.connect === 'function') {
       await client.connect("studionet");
     }
+    
     return client;
   };
 
   const formatDecimal = (val: string | number) => {
     const num = Number(val);
-    if (isNaN(num)) return "0.000000";
+    if (isNaN(num)) {
+      return "0.000000";
+    }
     return num.toFixed(6);
   };
 
-  const fetchSnapshotWebhook = async () => {
+  const fetchSnapshotData = async () => {
     setErrorMsg('');
     setIsLoadingSnapshot(true);
-    setWebhookUrl('');
+    setSnapshotJson('');
     setExpectedHash('');
 
     try {
       const res = await fetch(`/api/snapshot?pair=${encodeURIComponent(selectedPair)}&timeframe=4h`);
-      if (!res.ok) throw new Error(`API failed to fetch market data.`);
-      const data = await res.json();
       
+      if (!res.ok) {
+        throw new Error("API failed to fetch market data.");
+      }
+      
+      const data = await res.json();
       const source = data.marketData || data.payload || data;
       
       const cleanData = {
@@ -89,46 +101,11 @@ export default function MarketSentinelV7() {
       const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
       const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
       
+      setSnapshotJson(sortedStr);
       setExpectedHash(hashHex);
-
-      let finalUrl = '';
-
-      // Primary: ByteBin (Zero WAF, pure JSON delivery)
-      try {
-        const byteRes = await fetch('https://bytebin.lucko.me/post', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: sortedStr
-        });
-        if (byteRes.ok) {
-          const byteData = await byteRes.json();
-          if (byteData.key) finalUrl = `https://bytebin.lucko.me/${byteData.key}`;
-        }
-      } catch (e) {
-        console.log("ByteBin client fallback triggered.");
-      }
-
-      // Fallback: Automated Mocky API
-      if (!finalUrl) {
-        const mockyRes = await fetch('https://run.mocky.io/api/mock', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            status: 200,
-            content: sortedStr,
-            content_type: "application/json",
-            charset: "UTF-8"
-          })
-        });
-        if (!mockyRes.ok) throw new Error("Failed to auto-host payload. Check adblocker or CORS.");
-        const mockyData = await mockyRes.json();
-        finalUrl = mockyData.link;
-      }
-
-      setWebhookUrl(finalUrl);
       
     } catch (err: any) {
-      setErrorMsg(`Webhook Pipeline Error: ${err.message}`);
+      setErrorMsg(`Pipeline Error: ${err.message}`);
     } finally {
       setIsLoadingSnapshot(false);
     }
@@ -140,23 +117,22 @@ export default function MarketSentinelV7() {
     setTxStatus('Initializing...');
     setEvalResult(null);
 
-    if (!webhookUrl || !expectedHash) {
-      setErrorMsg("Please fetch the snapshot webhook data first.");
+    if (!snapshotJson || !expectedHash) {
       return;
     }
 
     try {
       setIsEvaluating(true);
       setTxStatus('Connecting to GenLayer Client...');
+      
       const client = await getClient();
 
       setTxStatus('Awaiting Wallet Signature...');
       
-      // Pass the Oracle URL and the canonical Hash to V7
       const hash = await client.writeContract({
         address: CONTRACT_ADDRESS,
         functionName: 'evaluate_market',
-        args: [webhookUrl, expectedHash],
+        args: [snapshotJson, expectedHash],
         value: BigInt(0)
       });
 
@@ -168,7 +144,7 @@ export default function MarketSentinelV7() {
         setEvalResult(receipt);
         setTxStatus('Finalized successfully!');
       } else {
-        await new Promise(r => setTimeout(r, 6000));
+        await new Promise(resolve => setTimeout(resolve, 6000));
         setTxStatus('Transaction broadcasted.');
       }
     } catch (err: any) {
@@ -185,12 +161,15 @@ export default function MarketSentinelV7() {
         
         <header className="border-b border-neutral-800 pb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-emerald-400">Market Sentinel V7 (Pro)</h1>
+            <h1 className="text-2xl font-bold text-emerald-400">Market Sentinel V6.2 (Push Oracle)</h1>
             <p className="text-[10px] text-neutral-500 mt-1">Contract: {CONTRACT_ADDRESS}</p>
           </div>
           <div>
             {!userAddress ? (
-              <button onClick={connectWallet} className="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">
+              <button 
+                onClick={connectWallet} 
+                className="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition"
+              >
                 Connect Wallet
               </button>
             ) : (
@@ -211,38 +190,34 @@ export default function MarketSentinelV7() {
           <h2 className="text-sm font-bold text-neutral-200">1. Select Trading Pair</h2>
           <div className="flex flex-wrap gap-2">
             {SUPPORTED_PAIRS.map((pair) => (
-              <button
-                key={pair}
-                onClick={() => setSelectedPair(pair)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                  selectedPair === pair ? 'bg-emerald-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
-                }`}
+              <button 
+                key={pair} 
+                onClick={() => setSelectedPair(pair)} 
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${selectedPair === pair ? 'bg-emerald-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}
               >
                 {pair}
               </button>
             ))}
           </div>
-
-          <button
-            onClick={fetchSnapshotWebhook}
-            disabled={isLoadingSnapshot}
+          <button 
+            onClick={fetchSnapshotData} 
+            disabled={isLoadingSnapshot} 
             className="w-full bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 py-2.5 rounded-lg text-xs font-bold transition disabled:opacity-50"
           >
-            {isLoadingSnapshot ? 'Deploying Payload to Oracle...' : `Generate Webhook for ${selectedPair}`}
+            {isLoadingSnapshot ? 'Generating Cryptographic Payload...' : `Fetch Data for ${selectedPair}`}
           </button>
         </section>
 
-        {webhookUrl && (
+        {snapshotJson && (
           <section className="bg-neutral-900 border border-neutral-800 p-5 rounded-xl space-y-3">
-            <h2 className="text-sm font-bold text-blue-400">2. Validator Oracle Ready</h2>
+            <h2 className="text-sm font-bold text-blue-400">2. Validator Payload Ready</h2>
             <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800 text-xs font-mono space-y-1 overflow-x-auto text-neutral-300">
-              <p><span className="text-neutral-500">Decentralized Host:</span> <a href={webhookUrl} target="_blank" rel="noreferrer" className="text-blue-400 underline break-all">{webhookUrl}</a></p>
+              <p><span className="text-neutral-500">Payload:</span> <span className="text-blue-400">Direct Injection (Ready)</span></p>
               <p><span className="text-neutral-500">SHA-256 Lock:</span> <span className="text-emerald-400">{expectedHash}</span></p>
             </div>
-
-            <button
-              onClick={evaluateMarket}
-              disabled={isEvaluating || !userAddress || !expectedHash}
+            <button 
+              onClick={evaluateMarket} 
+              disabled={isEvaluating || !userAddress || !expectedHash} 
               className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-lg text-sm font-bold transition disabled:opacity-50"
             >
               {isEvaluating ? 'Executing AI Consensus...' : 'Evaluate Market On-Chain'}
@@ -255,10 +230,12 @@ export default function MarketSentinelV7() {
             <h2 className="text-sm font-bold text-neutral-200 font-sans">3. Consensus Status</h2>
             <div className="bg-neutral-950 p-3 rounded-lg border border-neutral-800 space-y-2 text-neutral-300">
               <p><span className="text-neutral-500">Status:</span> <span className="text-amber-400">{txStatus}</span></p>
-              {txHash && <p><span className="text-neutral-500">Tx Hash:</span> <span className="text-neutral-200 break-all">{txHash}</span></p>}
+              {txHash && (
+                <p><span className="text-neutral-500">Tx Hash:</span> <span className="text-neutral-200 break-all">{txHash}</span></p>
+              )}
               {evalResult && (
                 <div className="mt-3 pt-3 border-t border-neutral-800 space-y-1">
-                  <p className="text-emerald-400 font-bold">Consensus Result Received:</p>
+                  <p className="text-emerald-400 font-bold">Consensus Result:</p>
                   <pre className="text-[10px] text-neutral-400 overflow-x-auto bg-neutral-900 p-2 rounded">
                     {JSON.stringify(evalResult, null, 2)}
                   </pre>
@@ -267,7 +244,7 @@ export default function MarketSentinelV7() {
             </div>
           </section>
         )}
-
+        
       </div>
     </div>
   );
