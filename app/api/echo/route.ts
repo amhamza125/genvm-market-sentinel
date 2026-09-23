@@ -6,13 +6,9 @@ export async function GET(req: Request) {
     const dataParam = url.searchParams.get('d');
 
     if (!dataParam) {
-      return new NextResponse(JSON.stringify({ error: 'Missing data payload' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return new NextResponse('Missing data payload', { status: 400 });
     }
 
-    // Universal Base64 decoding (Crash-proof for both Edge and Node runtimes)
     let decodedStr = '';
     if (typeof atob === 'function') {
         decodedStr = atob(dataParam);
@@ -20,19 +16,16 @@ export async function GET(req: Request) {
         decodedStr = Buffer.from(dataParam, 'base64').toString('utf-8');
     }
 
-    // Return the pure, decoded JSON string so GenVM can read it natively
+    // CRITICAL FIX: Return as text/plain so GenVM hands it to the contract as a pure Python string.
     return new NextResponse(decodedStr, {
       status: 200,
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'text/plain',
         'Access-Control-Allow-Origin': '*',
         'Cache-Control': 'no-store, max-age=0'
       }
     });
   } catch (err: any) {
-    return new NextResponse(JSON.stringify({ error: `Echo Error: ${err.message}` }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return new NextResponse(`Echo Error: ${err.message}`, { status: 500 });
   }
 }
