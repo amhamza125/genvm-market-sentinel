@@ -6,7 +6,7 @@ import { studionet } from 'genlayer-js/chains';
 import { custom } from 'viem';
 
 // Ensure this matches your GenLayer Studio deployment
-const CONTRACT_ADDRESS = "0x142B0CCC368f54eb6870f9eA98365fa9571F6DD6"; 
+const CONTRACT_ADDRESS = "0x96BBCe58F16fDC03B3f69A078dCFFa6e6e6d1697"; 
 const SUPPORTED_PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "NEAR/USDT", "VIRTUAL/USDT"];
 
 export default function MarketSentinelV6_2() {
