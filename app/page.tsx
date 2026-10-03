@@ -5,7 +5,7 @@ import { createClient } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
 import { custom } from 'viem';
 
-const CONTRACT_ADDRESS = "0xB90446e1820b40e7E5e1Bd4498CF28Cf5E7FB4c7";
+const CONTRACT_ADDRESS = "0x5623EF574F57B17593F25b49424F0b3F71d09565";
 const SUPPORTED_PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "NEAR/USDT", "VIRTUAL/USDT"];
 
 const LoadingSpinner = ({ className = "h-4 w-4" }) => (
