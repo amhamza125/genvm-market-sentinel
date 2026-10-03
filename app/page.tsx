@@ -5,7 +5,7 @@ import { createClient } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
 import { custom } from 'viem';
 
-const CONTRACT_ADDRESS = "0x5433C90Eb4D4D3b0E11d75549c39DaFc4Fcb1b8e";
+const CONTRACT_ADDRESS = "0x40DfD10F6d09F755C0de9324d4e0988D923e5791";
 const SUPPORTED_PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "NEAR/USDT", "VIRTUAL/USDT"];
 
 const LoadingSpinner = ({ className = "h-4 w-4" }) => (
@@ -18,10 +18,6 @@ export default function MarketSentinelOracle() {
   const [selectedPair, setSelectedPair] = useState(SUPPORTED_PAIRS[0]);
   const [liveStats, setLiveStats] = useState({ price: '0.00', change: '0.00', isPositive: true });
   
-  const [payloadString, setPayloadString] = useState('');
-  const [currentHash, setCurrentHash] = useState('');
-  
-  const [isFetchingData, setIsFetchingData] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   
   const [txHash, setTxHash] = useState('');
@@ -29,7 +25,7 @@ export default function MarketSentinelOracle() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Real-time market data syncer
+  // Real-time market data syncer (Purely visual for the dashboard now)
   useEffect(() => {
     let isMounted = true;
     const fetchLiveStats = async () => {
@@ -69,49 +65,8 @@ export default function MarketSentinelOracle() {
     }
   };
 
-  const formatDecimal = (val: string | number) => Number(val).toFixed(6);
-
-  const generateOraclePayload = async () => {
-    setErrorMsg('');
-    setIsFetchingData(true);
-    setTxStatus('IDLE');
-    
-    try {
-      const symbol = selectedPair.replace("/", "");
-      const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
-      const data = await res.json();
-      const livePrice = parseFloat(data.price);
-      
-      const cleanData = {
-        candle_timestamp: String(Math.floor(Date.now() / 1000)),
-        close: formatDecimal(livePrice),
-        high: formatDecimal(livePrice * 1.01),
-        low: formatDecimal(livePrice * 0.99),
-        open: formatDecimal(livePrice * 0.995),
-        pair: selectedPair,
-        previous_close: formatDecimal(livePrice * 0.992),
-        timeframe: "4h",
-        volume: formatDecimal(1500.5)
-      };
-
-      const sortedKeys = Object.keys(cleanData).sort() as (keyof typeof cleanData)[];
-      const sortedStr = "{" + sortedKeys.map(k => `"${k}":"${cleanData[k]}"`).join(",") + "}";
-      
-      const msgBuffer = new TextEncoder().encode(sortedStr);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-      const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-      
-      setPayloadString(sortedStr);
-      setCurrentHash(hashHex);
-    } catch (err: any) {
-      setErrorMsg(`Failed to construct payload: ${err.message}`);
-    } finally {
-      setIsFetchingData(false);
-    }
-  };
-
   const executeOraclePush = async () => {
-    if (!userAddress || !payloadString || !currentHash) return;
+    if (!userAddress) return;
 
     setIsProcessing(true);
     setTxStatus('PROCESSING');
@@ -126,10 +81,11 @@ export default function MarketSentinelOracle() {
         transport: custom((window as any).ethereum)
       } as any);
 
+      // We now ONLY pass the selected pair to the contract
       const hash = await client.writeContract({
         address: CONTRACT_ADDRESS as `0x${string}`,
         functionName: 'evaluate_market',
-        args: [payloadString, currentHash],
+        args: [selectedPair],
         value: BigInt(0)
       });
 
@@ -143,9 +99,9 @@ export default function MarketSentinelOracle() {
         if (traceError.includes("Resistance condition not satisfied")) {
           setTxStatus('HELD');
           setRejectionReason("Market price is currently below the hardcoded resistance threshold. The decentralized AI nodes have successfully verified the data authenticity, but halted the trade signal to prevent a false-breakout trap.");
-        } else if (traceError.includes("Deviation") || traceError.includes("Fabrication") || traceError.includes("Stale")) {
+        } else if (traceError.includes("Deviation") || traceError.includes("Fabrication") || traceError.includes("Stale") || traceError.includes("Failed to fetch")) {
           setTxStatus('ERROR');
-          setRejectionReason("Data Verification Failed: The oracle nodes detected stale timestamps or fabricated price data when cross-referencing the Binance API.");
+          setRejectionReason("Data Verification Failed: The oracle nodes could not securely fetch or verify the authoritative market data via API.");
         } else if (traceError || (receipt as any).status === 5) {
           setTxStatus('ERROR');
           setRejectionReason(`Contract Reverted: ${traceError.split('\n').pop() || "Unknown error"}`);
@@ -169,6 +125,13 @@ export default function MarketSentinelOracle() {
       setIsProcessing(false);
     }
   };
+
+  const executionPreview = JSON.stringify({
+    contract_address: CONTRACT_ADDRESS,
+    target_method: "evaluate_market",
+    arguments: [selectedPair],
+    execution_flow: "Contract Pulls API Data -> AI Verification",
+  }, null, 2);
 
   return (
     <div className="min-h-screen bg-[#050505] text-neutral-300 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
@@ -237,7 +200,7 @@ export default function MarketSentinelOracle() {
                   {SUPPORTED_PAIRS.map(pair => (
                     <button 
                       key={pair}
-                      onClick={() => { setSelectedPair(pair); setPayloadString(''); }}
+                      onClick={() => setSelectedPair(pair)}
                       className={`text-[11px] px-3 py-1.5 rounded-xl border transition-all font-mono font-semibold ${selectedPair === pair ? 'bg-indigo-500 border-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'bg-black/40 border-white/5 text-neutral-400 hover:border-white/10 hover:bg-black/60'}`}
                     >
                       {pair}
@@ -255,52 +218,34 @@ export default function MarketSentinelOracle() {
                   {liveStats.isPositive ? '↗' : '↘'} {liveStats.change}%
                 </div>
               </div>
-
-              <button 
-                onClick={generateOraclePayload}
-                disabled={isFetchingData}
-                className="w-full bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 font-bold text-xs py-3 rounded-xl transition-all flex items-center justify-center gap-2 mt-2 disabled:opacity-50"
-              >
-                {isFetchingData ? <LoadingSpinner /> : '🔄 Lock Live Price into Payload'}
-              </button>
             </div>
           </div>
 
-          {/* CRYPTO PAYLOAD WIDGET */}
+          {/* ORACLE EXECUTION REQUEST WIDGET */}
           <div className="bg-[#0f0f13] border border-white/5 rounded-3xl p-6 shadow-2xl backdrop-blur-sm flex flex-col transition-all duration-500 hover:border-blue-500/30">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                🔑 Cryptographic Payload
+                🔑 Oracle Execution Request
               </h2>
-              {payloadString && (
-                <div className="flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2.5 py-1 rounded-md">
-                  <span>⏳</span>
-                  <span className="text-[9px] font-bold uppercase tracking-wider">60s TTL Active</span>
-                </div>
-              )}
+              <div className="flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2.5 py-1 rounded-md">
+                <span className="text-[9px] font-bold uppercase tracking-wider">On-Chain Fetch</span>
+              </div>
             </div>
 
-            {payloadString ? (
-              <div className="flex-1 flex flex-col gap-4">
-                <textarea 
-                  rows={6} 
-                  readOnly
-                  value={payloadString}
-                  className="w-full flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-[10px] text-neutral-400 outline-none resize-none font-mono custom-scrollbar"
-                />
-                <div>
-                  <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-widest mb-1.5">SHA-256 Checksum Lock</p>
-                  <p className="bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-emerald-400 font-mono truncate">
-                    {currentHash}
-                  </p>
-                </div>
+            <div className="flex-1 flex flex-col gap-4">
+              <textarea 
+                rows={6} 
+                readOnly
+                value={executionPreview}
+                className="w-full flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-[10px] text-neutral-400 outline-none resize-none font-mono custom-scrollbar"
+              />
+              <div>
+                <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-widest mb-1.5">Network Security Policy</p>
+                <p className="bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-emerald-400 font-mono truncate">
+                  Target API data is verified via consensus layer
+                </p>
               </div>
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-neutral-600 border-2 border-dashed border-white/5 rounded-2xl">
-                <span className="text-2xl mb-2 opacity-50">⚡</span>
-                <p className="text-xs font-mono">Awaiting payload construction...</p>
-              </div>
-            )}
+            </div>
           </div>
         </div>
 
@@ -308,15 +253,15 @@ export default function MarketSentinelOracle() {
         <div>
           <button 
             onClick={executeOraclePush}
-            disabled={isProcessing || !payloadString || !userAddress || txStatus === 'PROCESSING'}
+            disabled={isProcessing || !userAddress || txStatus === 'PROCESSING'}
             className="w-full relative group overflow-hidden rounded-2xl bg-white text-black font-extrabold text-sm py-4 transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:scale-[1.01] active:scale-[0.99] shadow-xl shadow-indigo-500/10"
           >
             <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-indigo-400 via-blue-400 to-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity duration-500 mix-blend-multiply" />
             <span className="relative flex items-center justify-center gap-2">
               {txStatus === 'PROCESSING' ? (
-                <><LoadingSpinner /> Transmitting to GenLayer Consensus Nodes...</>
+                <><LoadingSpinner /> Contract pulling API data & Executing Consensus...</>
               ) : (
-                <>🚀 Execute Multi-LLM Oracle Verification</>
+                <>🚀 Trigger Sentinel Contract Evaluation</>
               )}
             </span>
           </button>
