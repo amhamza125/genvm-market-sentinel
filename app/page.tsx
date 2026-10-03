@@ -5,7 +5,7 @@ import { createClient } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
 import { custom } from 'viem';
 
-const CONTRACT_ADDRESS = "0x40DfD10F6d09F755C0de9324d4e0988D923e5791";
+const CONTRACT_ADDRESS = "0xB90446e1820b40e7E5e1Bd4498CF28Cf5E7FB4c7";
 const SUPPORTED_PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "NEAR/USDT", "VIRTUAL/USDT"];
 
 const LoadingSpinner = ({ className = "h-4 w-4" }) => (
@@ -18,6 +18,11 @@ export default function MarketSentinelOracle() {
   const [selectedPair, setSelectedPair] = useState(SUPPORTED_PAIRS[0]);
   const [liveStats, setLiveStats] = useState({ price: '0.00', change: '0.00', isPositive: true });
   
+  // Interactive payload state for telemetry & demo evaluation
+  const [payloadString, setPayloadString] = useState('');
+  const [currentHash, setCurrentHash] = useState('');
+  const [isFetchingData, setIsFetchingData] = useState(false);
+  
   const [isProcessing, setIsProcessing] = useState(false);
   
   const [txHash, setTxHash] = useState('');
@@ -25,7 +30,7 @@ export default function MarketSentinelOracle() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Real-time market data syncer (Purely visual for the dashboard now)
+  // Real-time market telemetry stream
   useEffect(() => {
     let isMounted = true;
     const fetchLiveStats = async () => {
@@ -42,7 +47,7 @@ export default function MarketSentinelOracle() {
           });
         }
       } catch (err) {
-        console.error("Market sync failed", err);
+        console.error("Market telemetry sync error:", err);
       }
     };
     
@@ -61,12 +66,50 @@ export default function MarketSentinelOracle() {
         setErrorMsg(`Connection Failed: ${err.message}`);
       }
     } else {
-      setErrorMsg("No Web3 wallet found. Please use MetaMask.");
+      setErrorMsg("No Web3 wallet found. Please install MetaMask or a compatible Web3 wallet.");
+    }
+  };
+
+  const formatDecimal = (val: string | number) => Number(val).toFixed(6);
+
+  // Client-side state simulation for rich interactive telemetry
+  const generateOraclePayload = async () => {
+    setErrorMsg('');
+    setIsFetchingData(true);
+    setTxStatus('IDLE');
+    
+    try {
+      const symbol = selectedPair.replace("/", "");
+      const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+      const data = await res.json();
+      const livePrice = parseFloat(data.price);
+      
+      const cleanData = {
+        execution_method: "CONTRACT_CONSENSUS_PULL",
+        expected_timestamp: String(Math.floor(Date.now() / 1000)),
+        pair: selectedPair,
+        projected_close: formatDecimal(livePrice),
+        verification_protocol: "MULTI_LLM_CONSENSUS"
+      };
+
+      const sortedKeys = Object.keys(cleanData).sort() as (keyof typeof cleanData)[];
+      const sortedStr = "{" + sortedKeys.map(k => `"${k}":"${cleanData[k]}"`).join(",") + "}";
+      
+      const msgBuffer = new TextEncoder().encode(sortedStr);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+      const hashHex = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+      
+      setPayloadString(sortedStr);
+      setCurrentHash(hashHex);
+    } catch (err: any) {
+      setErrorMsg(`Failed to build simulation payload: ${err.message}`);
+    } finally {
+      setIsFetchingData(false);
     }
   };
 
   const executeOraclePush = async () => {
-    if (!userAddress) return;
+    if (!userAddress || !payloadString) return;
 
     setIsProcessing(true);
     setTxStatus('PROCESSING');
@@ -81,7 +124,7 @@ export default function MarketSentinelOracle() {
         transport: custom((window as any).ethereum)
       } as any);
 
-      // We now ONLY pass the selected pair to the contract
+      // Secure Contract Call: Only the pair is sent; contract verifies data inside consensus
       const hash = await client.writeContract({
         address: CONTRACT_ADDRESS as `0x${string}`,
         functionName: 'evaluate_market',
@@ -98,13 +141,13 @@ export default function MarketSentinelOracle() {
         
         if (traceError.includes("Resistance condition not satisfied")) {
           setTxStatus('HELD');
-          setRejectionReason("Market price is currently below the hardcoded resistance threshold. The decentralized AI nodes have successfully verified the data authenticity, but halted the trade signal to prevent a false-breakout trap.");
-        } else if (traceError.includes("Deviation") || traceError.includes("Fabrication") || traceError.includes("Stale") || traceError.includes("Failed to fetch")) {
+          setRejectionReason("Market price is currently below the hardcoded resistance threshold. The decentralized AI nodes verified the data authenticity, but held the signal to protect against false breakouts.");
+        } else if (traceError.includes("API_FETCH_ERROR")) {
           setTxStatus('ERROR');
-          setRejectionReason("Data Verification Failed: The oracle nodes could not securely fetch or verify the authoritative market data via API.");
+          setRejectionReason(`API Fetch Issue: ${traceError.split('API_FETCH_ERROR: ')[1]?.split('\n')[0]}`);
         } else if (traceError || (receipt as any).status === 5) {
           setTxStatus('ERROR');
-          setRejectionReason(`Contract Reverted: ${traceError.split('\n').pop() || "Unknown error"}`);
+          setRejectionReason(`Execution Reverted: ${traceError.split('\n').pop() || "Transaction failed in GenVM execution"}`);
         } else {
           setTxStatus('EMITTED');
         }
@@ -116,7 +159,7 @@ export default function MarketSentinelOracle() {
       const msg = err.shortMessage || err.message || String(err);
       if (msg.includes("Resistance condition not satisfied")) {
         setTxStatus('HELD');
-        setRejectionReason("Market price is currently below the hardcoded resistance threshold. The decentralized AI nodes have successfully verified the data authenticity, but halted the trade signal to prevent a false-breakout trap.");
+        setRejectionReason("Market price is currently below the hardcoded resistance threshold. The decentralized AI nodes verified the data authenticity, but held the signal to protect against false breakouts.");
       } else {
         setTxStatus('ERROR');
         setErrorMsg(`Execution Failed: ${msg}`);
@@ -126,13 +169,6 @@ export default function MarketSentinelOracle() {
     }
   };
 
-  const executionPreview = JSON.stringify({
-    contract_address: CONTRACT_ADDRESS,
-    target_method: "evaluate_market",
-    arguments: [selectedPair],
-    execution_flow: "Contract Pulls API Data -> AI Verification",
-  }, null, 2);
-
   return (
     <div className="min-h-screen bg-[#050505] text-neutral-300 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
@@ -140,6 +176,7 @@ export default function MarketSentinelOracle() {
         <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-blue-600/10 blur-[120px] rounded-full mix-blend-screen" />
       </div>
 
+      {/* HEADER */}
       <nav className="border-b border-white/5 bg-black/60 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-[1400px] mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -171,6 +208,7 @@ export default function MarketSentinelOracle() {
         </div>
       </nav>
 
+      {/* MAIN CONTAINER */}
       <div className="max-w-[1000px] mx-auto px-6 py-10 relative z-10 space-y-8">
 
         {errorMsg && (
@@ -181,7 +219,7 @@ export default function MarketSentinelOracle() {
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* LIVE MARKET DATA WIDGET */}
+          {/* LIVE MARKET TELEMETRY */}
           <div className="bg-[#0f0f13] border border-white/5 rounded-3xl p-6 shadow-2xl backdrop-blur-sm transition-all duration-500 hover:border-indigo-500/30">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-sm font-bold text-white flex items-center gap-2">
@@ -200,7 +238,7 @@ export default function MarketSentinelOracle() {
                   {SUPPORTED_PAIRS.map(pair => (
                     <button 
                       key={pair}
-                      onClick={() => setSelectedPair(pair)}
+                      onClick={() => { setSelectedPair(pair); setPayloadString(''); }}
                       className={`text-[11px] px-3 py-1.5 rounded-xl border transition-all font-mono font-semibold ${selectedPair === pair ? 'bg-indigo-500 border-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'bg-black/40 border-white/5 text-neutral-400 hover:border-white/10 hover:bg-black/60'}`}
                     >
                       {pair}
@@ -218,56 +256,74 @@ export default function MarketSentinelOracle() {
                   {liveStats.isPositive ? '↗' : '↘'} {liveStats.change}%
                 </div>
               </div>
+
+              <button 
+                onClick={generateOraclePayload}
+                disabled={isFetchingData}
+                className="w-full bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 font-bold text-xs py-3 rounded-xl transition-all flex items-center justify-center gap-2 mt-2 disabled:opacity-50"
+              >
+                {isFetchingData ? <LoadingSpinner /> : '🔄 Generate Oracle Telemetry Payload'}
+              </button>
             </div>
           </div>
 
-          {/* ORACLE EXECUTION REQUEST WIDGET */}
+          {/* CRYPTOGRAPHIC INTENT & SPECIFICATION */}
           <div className="bg-[#0f0f13] border border-white/5 rounded-3xl p-6 shadow-2xl backdrop-blur-sm flex flex-col transition-all duration-500 hover:border-blue-500/30">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                🔑 Oracle Execution Request
+                🔑 Cryptographic Spec
               </h2>
-              <div className="flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2.5 py-1 rounded-md">
-                <span className="text-[9px] font-bold uppercase tracking-wider">On-Chain Fetch</span>
-              </div>
+              {payloadString && (
+                <div className="flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2.5 py-1 rounded-md">
+                  <span>⏳</span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider">Ready for Execution</span>
+                </div>
+              )}
             </div>
 
-            <div className="flex-1 flex flex-col gap-4">
-              <textarea 
-                rows={6} 
-                readOnly
-                value={executionPreview}
-                className="w-full flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-[10px] text-neutral-400 outline-none resize-none font-mono custom-scrollbar"
-              />
-              <div>
-                <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-widest mb-1.5">Network Security Policy</p>
-                <p className="bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-emerald-400 font-mono truncate">
-                  Target API data is verified via consensus layer
-                </p>
+            {payloadString ? (
+              <div className="flex-1 flex flex-col gap-4">
+                <textarea 
+                  rows={6} 
+                  readOnly
+                  value={payloadString}
+                  className="w-full flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-[10px] text-neutral-400 outline-none resize-none font-mono custom-scrollbar"
+                />
+                <div>
+                  <p className="text-[9px] text-neutral-500 font-bold uppercase tracking-widest mb-1.5">SHA-256 State Simulation Hash</p>
+                  <p className="bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-emerald-400 font-mono truncate">
+                    {currentHash}
+                  </p>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-neutral-600 border-2 border-dashed border-white/5 rounded-2xl">
+                <span className="text-2xl mb-2 opacity-50">⚡</span>
+                <p className="text-xs font-mono text-center px-4">Generate payload above to simulate<br/>consensus state verification...</p>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* EXECUTION BUTTON */}
+        {/* ORACLE EVALUATION BUTTON */}
         <div>
           <button 
             onClick={executeOraclePush}
-            disabled={isProcessing || !userAddress || txStatus === 'PROCESSING'}
+            disabled={isProcessing || !payloadString || !userAddress || txStatus === 'PROCESSING'}
             className="w-full relative group overflow-hidden rounded-2xl bg-white text-black font-extrabold text-sm py-4 transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:scale-[1.01] active:scale-[0.99] shadow-xl shadow-indigo-500/10"
           >
             <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-indigo-400 via-blue-400 to-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity duration-500 mix-blend-multiply" />
             <span className="relative flex items-center justify-center gap-2">
               {txStatus === 'PROCESSING' ? (
-                <><LoadingSpinner /> Contract pulling API data & Executing Consensus...</>
+                <><LoadingSpinner /> Contract Pulling Data & Executing GenLayer AI Consensus...</>
               ) : (
-                <>🚀 Trigger Sentinel Contract Evaluation</>
+                <>🚀 Execute Secure Multi-LLM Oracle Verification</>
               )}
             </span>
           </button>
         </div>
 
-        {/* HUMAN READABLE RECEIPT WIDGET */}
+        {/* HUMAN-READABLE RECEIPT WIDGET */}
         {txStatus !== 'IDLE' && txStatus !== 'PROCESSING' && (
           <div className="overflow-hidden transition-all duration-700 animate-fade-in">
             <div className={`border rounded-3xl p-6 shadow-2xl relative overflow-hidden ${
@@ -301,7 +357,7 @@ export default function MarketSentinelOracle() {
                       {txStatus === 'HELD' ? 'SIGNAL HELD' : txStatus === 'EMITTED' ? 'SIGNAL EMITTED' : 'CONSENSUS FAILED'}
                     </h3>
                     <p className="text-neutral-400 text-xs mt-1 font-mono">
-                      {txStatus === 'HELD' ? 'Logic Gate: Resistance Protection Active' : 'Data authentically verified by GenVM nodes'}
+                      {txStatus === 'HELD' ? 'Logic Gate: Resistance Protection Active' : 'Data authentically fetched & verified by GenVM nodes'}
                     </p>
                   </div>
                 </div>
