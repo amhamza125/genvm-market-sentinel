@@ -384,7 +384,8 @@ export default function MarketSentinelOracle() {
                 
                 <div className="text-left md:text-right">
                   <p className="text-[10px] text-neutral-500 font-bold uppercase tracking-widest mb-1">Network Tx Hash</p>
-                  <a href={`https://explorer.genlayer.com/tx/${txHash}`} target="_blank" rel="noreferrer" className="text-xs text-indigo-400 hover:text-indigo-300 font-mono transition-colors">
+                  {/* EXPLORER URL UPDATED HERE */}
+                  <a href={`https://explorer-studio.genlayer.com/tx/${txHash}`} target="_blank" rel="noreferrer" className="text-xs text-indigo-400 hover:text-indigo-300 font-mono transition-colors">
                     {txHash.substring(0, 16)}...{txHash.slice(-12)}
                   </a>
                 </div>
