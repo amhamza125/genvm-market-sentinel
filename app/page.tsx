@@ -140,7 +140,9 @@ export default function MarketSentinelOracle() {
         
         // GenLayer specific execution status checks
         const leaderReceipt = (receipt as any).consensus_data?.leader_receipt?.[0];
-        const isSuccess = leaderReceipt?.execution_result === 'SUCCESS' || receipt.status === 1 || receipt.status === 'success';
+        
+        // Use Type Assertion (as any) to bypass strict TypeScript checking for Vercel builds
+        const isSuccess = leaderReceipt?.execution_result === 'SUCCESS' || (receipt as any).status === 1 || (receipt as any).status === 'success';
         
         // Grab the raw exception traces if they exist
         const errorTrace = leaderReceipt?.error || leaderReceipt?.genvm_result?.stderr || "";
@@ -157,7 +159,7 @@ export default function MarketSentinelOracle() {
         // 2. Check for actual API connection issues
         } else if (errorTrace.includes("API_FETCH_ERROR")) {
           setTxStatus('ERROR');
-          setRejectionReason(`API Fetch Issue: ${errorTrace.split('API_FETCH_ERROR: ')[1]?.split('\n')[0] || "Network blocked by exchange"}`);
+          setRejectionReason(`API Fetch Issue: ${errorTrace.split('API_FETCH_ERROR: ')[1]?.split('\n')[0]}`);
         
         // 3. Catch true blockchain reverts (while ignoring harmless Python warnings if isSuccess is true)
         } else if (!isSuccess) {
