@@ -138,17 +138,34 @@ export default function MarketSentinelOracle() {
       if (typeof client.waitForTransactionReceipt === 'function') {
         const receipt = await client.waitForTransactionReceipt({ hash, interval: 3000, retries: 40 });
         
-        const traceError = (receipt as any).consensus_data?.leader_receipt?.[0]?.genvm_result?.stderr || "";
+        // GenLayer specific execution status checks
+        const leaderReceipt = (receipt as any).consensus_data?.leader_receipt?.[0];
+        const isSuccess = leaderReceipt?.execution_result === 'SUCCESS' || receipt.status === 1 || receipt.status === 'success';
         
-        if (traceError.includes("Resistance condition not satisfied")) {
+        // Grab the raw exception traces if they exist
+        const errorTrace = leaderReceipt?.error || leaderReceipt?.genvm_result?.stderr || "";
+        
+        // 1. Check for expected operational halts first
+        if (errorTrace.includes("Resistance condition not satisfied")) {
           setTxStatus('HELD');
           setRejectionReason("Market price is currently below the hardcoded resistance threshold. The decentralized AI nodes verified the data authenticity, but held the signal to protect against false breakouts.");
-        } else if (traceError.includes("API_FETCH_ERROR")) {
+        
+        } else if (errorTrace.includes("already processed")) {
+          setTxStatus('HELD');
+          setRejectionReason("Oracle Rate Limit Active: The GenVM nodes have already verified and evaluated the current 4-hour candle for this exact trading pair. Please wait for the next 4-hour settlement window.");
+        
+        // 2. Check for actual API connection issues
+        } else if (errorTrace.includes("API_FETCH_ERROR")) {
           setTxStatus('ERROR');
-          setRejectionReason(`API Fetch Issue: ${traceError.split('API_FETCH_ERROR: ')[1]?.split('\n')[0]}`);
-        } else if (traceError || (receipt as any).status === 5) {
+          setRejectionReason(`API Fetch Issue: ${errorTrace.split('API_FETCH_ERROR: ')[1]?.split('\n')[0] || "Network blocked by exchange"}`);
+        
+        // 3. Catch true blockchain reverts (while ignoring harmless Python warnings if isSuccess is true)
+        } else if (!isSuccess) {
           setTxStatus('ERROR');
-          setRejectionReason(`Execution Reverted: ${traceError.split('\n').pop() || "Transaction failed in GenVM execution"}`);
+          const cleanError = errorTrace.split('Exception: ').pop()?.split('\n')[0] || "Transaction failed in GenVM execution";
+          setRejectionReason(`Execution Reverted: ${cleanError}`);
+        
+        // 4. Clean Execution (Handles the "UserWarning: pickling storage class" gracefully)
         } else {
           setTxStatus('EMITTED');
         }
@@ -358,7 +375,7 @@ export default function MarketSentinelOracle() {
                       {txStatus === 'HELD' ? 'SIGNAL HELD' : txStatus === 'EMITTED' ? 'SIGNAL EMITTED' : 'CONSENSUS FAILED'}
                     </h3>
                     <p className="text-neutral-400 text-xs mt-1 font-mono">
-                      {txStatus === 'HELD' ? 'Logic Gate: Resistance Protection Active' : 'Data authentically fetched & verified by GenVM nodes'}
+                      {txStatus === 'HELD' ? 'Oracle Logic Gate Triggered' : 'Data authentically fetched & verified by GenVM nodes'}
                     </p>
                   </div>
                 </div>
