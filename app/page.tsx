@@ -6,7 +6,7 @@ import { studionet } from 'genlayer-js/chains';
 import { custom } from 'viem';
 
 // Updated with your new fully secure contract deployment!
-const CONTRACT_ADDRESS = "0x383a74c0011Ae3767140b68fb911dC13C953dfdE";
+const CONTRACT_ADDRESS = "0xb9056ca3649432671f7b0A4a297D526da0b1BFBA";
 const SUPPORTED_PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "NEAR/USDT", "VIRTUAL/USDT"];
 
 const LoadingSpinner = ({ className = "h-4 w-4" }) => (
